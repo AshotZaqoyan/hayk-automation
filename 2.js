@@ -114,7 +114,24 @@ export const code = async (inputs) => {
                 if (article.title.toLowerCase().includes("archives") || article.title.toLowerCase().includes("topics")) continue;
 
                 try {
-                    const response = await fetch(article.link, { headers: { 'User-Agent': 'Mozilla/5.0' }, timeout: 10000 });
+                    const headers = {
+                        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                        'Accept-Language': 'en-US,en;q=0.5',
+                        'Accept-Encoding': 'gzip, deflate, br',
+                        'Sec-Ch-Ua': '"Google Chrome";v="123", "Not:A-Brand";v="8", "Chromium";v="123"',
+                        'Sec-Ch-Ua-Mobile': '?0',
+                        'Sec-Ch-Ua-Platform': '"macOS"',
+                        'Sec-Fetch-Dest': 'document',
+                        'Sec-Fetch-Mode': 'navigate',
+                        'Sec-Fetch-Site': 'cross-site',
+                        'Upgrade-Insecure-Requests': '1',
+                        'Connection': 'keep-alive',
+                        'Cache-Control': 'max-age=0',
+                        'Referer': 'https://www.google.com/'
+                    };
+
+                    const response = await fetch(article.link, { headers, timeout: 15000 });
                     if (!response.ok) {
                         await addLog("Web", "warning", `Անհասանելի հոդված՝ ${article.link} (Code ${response.status})`);
                         continue;
