@@ -13,7 +13,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const configPath = path.join(__dirname, 'config.json');
 
-const dev = process.env.NODE_ENV !== 'production';
+const dev = false; // Always run in production mode to fix WebSocket / HTTPS issues
 const hostname = 'localhost';
 const port = 3000;
 
