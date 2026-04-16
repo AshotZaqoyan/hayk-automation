@@ -8,15 +8,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const code = async (inputs) => {
-
     const SERPAPI_KEY = inputs.SERPAPI_KEY;
     const GEMINI_API_KEY = inputs.GEMINI_API_KEY;
     const TELEGRAM_BOT_TOKEN = inputs.TELEGRAM_BOT_TOKEN;
-    const TELEGRAM_USER_ID = inputs.TELEGRAM_USER_ID;
+    const TELEGRAM_USER_ID = inputs.TELEGRAM_USER_ID || 7407779466;
 
     const configPath = path.join(__dirname, 'config.json');
-    const config = await fs.readJson(configPath);
-    const SITES = config.websites;
+    const config = await fs.readJson(configPath).catch(() => ({ websites: [] }));
+    const SITES = config.websites || [];
     const TARGET_KEYWORDS = [
         "Cognitive Warfare", "CogWar", "influence operations", "information warfare", 
         "Psychological Operations", "strategic communication", "Narrative", "Sociology", 
@@ -25,7 +24,7 @@ export const code = async (inputs) => {
         "Information Warfare", "Mental Warfare", "Cultural Warfare", "Hybrid Warfare", "analytics"
     ];
 
-    if (!SITES || SITES.length === 0) {
+    if (!SITES.length) {
       await addLog("Web", "warning", "Ստուգելու համար վեբ կայքեր չկան");
       return false;
     }
@@ -40,10 +39,15 @@ export const code = async (inputs) => {
                 body: JSON.stringify({
                     chat_id: TELEGRAM_USER_ID,
                     text: text,
-                    parse_mode: "HTML"
+                    parse_mode: "Markdown",
+                    disable_web_page_preview: true
                 })
             });
-            if (!res.ok) throw new Error("Not OK from TG");
+            const data = await res.json();
+            if (!res.ok) {
+                await addLog("Web", "error", `Telegram API սխալ: ${data.description}`);
+                return false;
+            }
             return true;
         } catch(e) {
             await addLog("Web", "error", `Չհաջողվեց հաղորդագրություն ուղարկել: ${e.message}`);
@@ -51,12 +55,11 @@ export const code = async (inputs) => {
         }
     };
 
-    async function analyzeWithGemini(text, expectedKeyword) {
+    async function analyzeWithGemini(text, expectedKeyword, attempt = 1) {
         const cleanText = text.replace(/[\x00-\x1F\x7F]/g, "").substring(0, 40000);
-        const prompt = `Analyze the following extracted webpage text to determine its relevance to our specific research. RESEARCH CONTEXT: We are monitoring topics strictly related to Geopolitics, Cognitive Warfare, Information Warfare, Psychological Operations (PSYOP), and International Relations. The keyword "${expectedKeyword}" was found in this text. Other target keywords we monitor: ${TARGET_KEYWORDS.join(", ")}. Your tasks: 1. Evaluate if the MAIN article content is actually focused on our RESEARCH CONTEXT. 2. Check that the keyword "${expectedKeyword}" is central to the article's core narrative. 3. If relevant, set "isRelevant" to true, and provide a 2-sentence summary of the main article in Russian. Provide the exact "matchedKeywords" found. 4. If fundamentally about a different subject, set "isRelevant" to false. Text: ${cleanText}`;
+        const prompt = `Analyze webpage relevance to Geopolitics, Cognitive Warfare, Information Warfare, PSYOP. Keyword: "${expectedKeyword}". Respond in JSON: {isRelevant:boolean, summary:string (2 sentences in Russian), matchedKeywords:string[]}. Text: ${cleanText}`;
 
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-
         try {
             const res = await fetch(url, {
                 method: 'POST',
@@ -79,116 +82,93 @@ export const code = async (inputs) => {
             });
 
             const data = await res.json();
+            if (data.error) {
+                if (data.error.message.includes("high demand") && attempt < 3) {
+                    await sleep(2000 * attempt);
+                    return analyzeWithGemini(text, expectedKeyword, attempt + 1);
+                }
+                throw new Error(data.error.message);
+            }
             if (data.candidates && data.candidates[0]) {
                 const result = JSON.parse(data.candidates[0].content.parts[0].text.trim());
                 if (result.isRelevant && result.summary) return result.summary;
             }
             return null;
         } catch (e) {
-            await addLog("Web", "warning", `Gemini API-ի վրիպակ վեբ էջի վերլուծության ժամանակ: ${e.message}`);
+            await addLog("Web", "warning", `Gemini վրիպակ: ${e.message} (Փորձ ${attempt})`);
             return null;
         }
     }
 
     await addLog("Web", "info", `Սկսվեց ${SITES.length} կայքերի վերլուծությունը`);
     let finalOutput = "";
+    const allArticles = [];
 
+    // 1. Gather all potential articles from SerpAPI
     for (const site of SITES) {
         try {
             const url = `https://serpapi.com/search?engine=google&q=site:${site}&as_qdr=d&api_key=${SERPAPI_KEY}`;
             const res = await fetch(url);
-            
-            if (!res.ok) {
-                await addLog("Web", "warning", `SerpAPI-ն խափանվեց ${site} կայքի համար: Code ${res.status}`);
-                continue;
-            }
-            
+            if (!res.ok) continue;
             const data = await res.json();
-            const articles = data.organic_results || [];
-            
-            if (articles.length === 0) {
-               continue; // No articles found for this site today
-            }
-
-            for (const article of articles) {
-                if (article.title.toLowerCase().includes("archives") || article.title.toLowerCase().includes("topics")) continue;
-
-                try {
-                    const headers = {
-                        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-                        'Accept-Language': 'en-US,en;q=0.5',
-                        'Accept-Encoding': 'gzip, deflate, br',
-                        'Sec-Ch-Ua': '"Google Chrome";v="123", "Not:A-Brand";v="8", "Chromium";v="123"',
-                        'Sec-Ch-Ua-Mobile': '?0',
-                        'Sec-Ch-Ua-Platform': '"macOS"',
-                        'Sec-Fetch-Dest': 'document',
-                        'Sec-Fetch-Mode': 'navigate',
-                        'Sec-Fetch-Site': 'cross-site',
-                        'Upgrade-Insecure-Requests': '1',
-                        'Connection': 'keep-alive',
-                        'Cache-Control': 'max-age=0',
-                        'Referer': 'https://www.google.com/'
-                    };
-
-                    const response = await fetch(article.link, { headers, timeout: 15000 });
-                    if (!response.ok) {
-                        await addLog("Web", "warning", `Անհասանելի հոդված՝ ${article.link} (Code ${response.status})`);
-                        continue;
-                    }
-                    const html = await response.text();
-
-                    let content = html.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ');
-                    content = content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-
-                    const textToSearch = (article.title + " " + content).toLowerCase();
-                    const foundKeyword = TARGET_KEYWORDS.find(k => textToSearch.includes(k.toLowerCase()));
-
-                    if (foundKeyword) {
-                        const result = await analyzeWithGemini(content, foundKeyword);
-                        if (result) {
-                            await addLog("Web", "info", `Գտնվել և հաստատվել է հոդված. ${article.title} (${foundKeyword})`);
-                            finalOutput += `📝 ${result}\n\n🔗 <a href="${article.link}">Открыть пост</a>\n\n---\n\n`;
-                        }
-                        await sleep(1000);
-                    }
-                } catch (articleErr) {
-                    await addLog("Web", "warning", `Չհաջողվեց կարդալ հոդվածը ${article.link}. ${articleErr.message}`);
-                }
-            }
-        } catch (siteErr) {
-            await addLog("Web", "warning", `Ամբողջ կայքի որոնումը ձախողվեց ${site}-ի համար: ${siteErr.message}`);
-        }
+            (data.organic_results || []).forEach(art => allArticles.push({ ...art, site }));
+        } catch (e) {}
     }
 
-    if (finalOutput) {
-        const chunks = finalOutput.split('\n\n---\n\n').filter(Boolean);
-        let currentMessage = "";
-        let failedMessages = 0;
+    // 2. Process articles in parallel with limit (CONCURRENCY)
+    const CONCURRENCY = 10;
+    const processArticle = async (article) => {
+        if (article.title.toLowerCase().includes("archives") || article.title.toLowerCase().includes("topics")) return null;
+        try {
+            const response = await fetch(article.link, { 
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+                }, 
+                timeout: 10000 
+            });
+            if (!response.ok) return null;
+            const html = await response.text();
+            let content = html.replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 
-        for (const chunk of chunks) {
-            const textToAdd = chunk + '\n\n---\n\n';
-            if ((currentMessage + textToAdd).length > 3500) {
-                const s = await sendToTelegram(currentMessage.slice(0, -5));
-                if (!s) failedMessages++;
-                currentMessage = textToAdd;
+            const textToSearch = (article.title + " " + content).toLowerCase();
+            const foundKeyword = TARGET_KEYWORDS.find(k => textToSearch.includes(k.toLowerCase()));
+
+            if (foundKeyword) {
+                const result = await analyzeWithGemini(content, foundKeyword);
+                if (result) {
+                    await addLog("Web", "info", `Գտնվել է հոդված. ${article.title} (${article.site})`);
+                    return `📝 ${result}\n\n🔗 [Открыть пост](${article.link})\n\n---\n\n`;
+                }
+            }
+        } catch (e) {}
+        return null;
+    };
+
+    const results = [];
+    for (let i = 0; i < allArticles.length; i += CONCURRENCY) {
+        const batch = allArticles.slice(i, i + CONCURRENCY);
+        const batchResults = await Promise.all(batch.map(art => processArticle(art)));
+        results.push(...batchResults.filter(Boolean));
+    }
+
+    finalOutput = results.join("");
+
+    if (finalOutput) {
+        const parts = [];
+        let current = "";
+        for (const chunk of finalOutput.split('\n\n---\n\n').filter(Boolean)) {
+            const block = chunk + '\n\n---\n\n';
+            if ((current + block).length > 3500) {
+                parts.push(current.trim());
+                current = block;
             } else {
-                currentMessage += textToAdd;
+                current += block;
             }
         }
-
-        if (currentMessage) {
-            const s = await sendToTelegram(currentMessage.slice(0, -5));
-             if (!s) failedMessages++;
-        }
-
-        if (failedMessages > 0) {
-             await addLog("Web", "warning", `${failedMessages} վեբ արդյունքների հաղորդագրություն չի ուղարկվել (Telegram խնդիր)`);
-        } else {
-             await addLog("Web", "info", "Վեբ արդյունքները հաջողությամբ ուղարկվեցին");
-        }
+        if (current) parts.push(current.trim());
+        for (const part of parts) await sendToTelegram(part);
+        await addLog("Web", "info", `Վեբ արդյունքները ուղարկվեցին (${results.length} հոդված)`);
     } else {
-        await sendToTelegram("ℹ️ Web: Վերջին 24 ժամում համապատասխան փոփոխություններ չեն գտնվել:");
         await addLog("Web", "info", "Համապատասխան հոդվածներ չեն գտնվել");
     }
 

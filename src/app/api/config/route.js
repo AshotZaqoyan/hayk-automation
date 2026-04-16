@@ -13,6 +13,16 @@ export async function GET() {
   }
 }
 
+function cleanDomain(url) {
+  try {
+    let domain = url.trim().replace(/^(https?:\/\/)?(www\.)?/, '');
+    domain = domain.split(/[/?#]/)[0];
+    return domain.toLowerCase();
+  } catch (e) {
+    return url.toLowerCase();
+  }
+}
+
 export async function POST(request) {
   try {
     const { type, action, value } = await request.json();
@@ -29,8 +39,9 @@ export async function POST(request) {
       }
     } else if (type === 'website') {
       if (action === 'add') {
-        if (value && !config.websites.includes(value)) {
-          config.websites.push(value);
+        const domain = cleanDomain(value);
+        if (domain && !config.websites.includes(domain)) {
+          config.websites.push(domain);
         }
       } else if (action === 'delete') {
         config.websites = config.websites.filter(w => w !== value);
