@@ -78,11 +78,13 @@ export const code = async (inputs) => {
         });
         const data = await response.json();
         if (data.error) {
-            if (data.error.message.includes("high demand") && attempt < 3) {
-                await sleep(2000 * attempt);
+            if ((data.error.message.toLowerCase().includes("high demand") || data.error.message.toLowerCase().includes("quota")) && attempt < 6) {
+                const waitTime = 10000 * attempt;
+                await addLog("Telegram", "warning", `Gemini-ն ծանրաբեռնված է, սպասում ենք ${waitTime/1000}վրկ... (Փորձ ${attempt})`);
+                await sleep(waitTime);
                 return summarizeWithGemini(text, attempt + 1);
             }
-            return "Gemini Error";
+            return "Gemini Error: " + data.error.message;
         }
         return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "No summary";
       } catch (e) { return "Error"; }

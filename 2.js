@@ -83,8 +83,10 @@ export const code = async (inputs) => {
 
             const data = await res.json();
             if (data.error) {
-                if (data.error.message.includes("high demand") && attempt < 3) {
-                    await sleep(2000 * attempt);
+                if ((data.error.message.toLowerCase().includes("high demand") || data.error.message.toLowerCase().includes("quota")) && attempt < 6) {
+                    const waitTime = 10000 * attempt; // Սպասում ենք 10վրկ, 20վրկ, 30վրկ...
+                    await addLog("Web", "warning", `Gemini-ն ծանրաբեռնված է, սպասում ենք ${waitTime/1000}վրկ... (Փորձ ${attempt})`);
+                    await sleep(waitTime);
                     return analyzeWithGemini(text, expectedKeyword, attempt + 1);
                 }
                 throw new Error(data.error.message);
@@ -115,8 +117,8 @@ export const code = async (inputs) => {
         } catch (e) {}
     }
 
-    // 2. Process articles in parallel with limit (CONCURRENCY)
-    const CONCURRENCY = 10;
+    // 2. Process articles in parallel with a smaller limit to avoid Gemini overload
+    const CONCURRENCY = 3;
     const processArticle = async (article) => {
         if (article.title.toLowerCase().includes("archives") || article.title.toLowerCase().includes("topics")) return null;
         try {
