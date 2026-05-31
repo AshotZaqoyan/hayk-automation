@@ -57,7 +57,7 @@ export const code = async (inputs) => {
     for (const channel of channels) {
       try {
         const entity = await client.getEntity(channel);
-        const messages = await client.getMessages(entity, { limit: 30 });
+        const messages = await client.getMessages(entity, { limit: 50 });
         for (const msg of messages) {
           if (msg.date && msg.message && (now - Number(msg.date) * 1000 <= timeLimit)) {
             rawMessages.push({ channel, id: msg.id, text: msg.message, date: new Date(Number(msg.date) * 1000) });
@@ -84,10 +84,14 @@ export const code = async (inputs) => {
                 await sleep(waitTime);
                 return summarizeWithGemini(text, attempt + 1);
             }
+            await addLog("Telegram", "error", `Gemini սխալ: ${data.error.message}`);
             return "Gemini Error: " + data.error.message;
         }
         return data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "No summary";
-      } catch (e) { return "Error"; }
+      } catch (e) { 
+          await addLog("Telegram", "error", `Gemini խափանում: ${e.message}`);
+          return "Error"; 
+      }
     };
 
     const matches = [];

@@ -111,7 +111,11 @@ export const code = async (inputs) => {
         try {
             const url = `https://serpapi.com/search?engine=google&q=site:${site}&as_qdr=d&api_key=${SERPAPI_KEY}`;
             const res = await fetch(url);
-            if (!res.ok) continue;
+            if (!res.ok) {
+                const errorData = await res.text();
+                await addLog("Web", "error", `SerpAPI սխալ կայքի համար ${site}: ${res.status} ${errorData}`);
+                continue;
+            }
             const data = await res.json();
             (data.organic_results || []).forEach(art => allArticles.push({ ...art, site }));
         } catch (e) {}
